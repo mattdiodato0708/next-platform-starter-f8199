@@ -9,11 +9,20 @@ export const metadata = {
 
 const tagName = 'randomWiki';
 const randomWikiUrl = 'https://en.wikipedia.org/api/rest_v1/page/random/summary';
+const fallbackWikiUrl = 'https://en.wikipedia.org';
 const maxExtractLength = 200;
 const revalidateTTL = 60;
 
+function truncateExtract(text) {
+    if (!text) return '';
+    if (text.length <= maxExtractLength) return text;
+    const truncated = text.slice(0, maxExtractLength);
+    const lastSpace = truncated.lastIndexOf(' ');
+    return (lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated) + ' [...]';
+}
+
 const explainer = `
-This page perfoms a \`fetch\` on the server to get a random article from Wikipedia. 
+This page performs a \`fetch\` on the server to get a random article from Wikipedia. 
 The fetched data is then cached with a tag named "${tagName}" and a maximum age of ${revalidateTTL} seconds.
 
 ~~~jsx
@@ -56,30 +65,45 @@ export default async function Page() {
 }
 
 async function RandomWikiArticle() {
-    const randomWiki = await fetch(randomWikiUrl, {
-        next: { revalidate: revalidateTTL, tags: [tagName] }
-    });
+    const fallback = (
+        <Card className="max-w-2xl">
+            <p className="text-red-600">Failed to fetch Wikipedia article. Please try again later.</p>
+        </Card>
+    );
 
-    if (!randomWiki.ok) {
-        return (
-            <Card className="max-w-2xl">
-                <p className="text-red-600">Failed to fetch Wikipedia article. Please try again later.</p>
-            </Card>
-        );
+    let content;
+
+    try {
+        const randomWiki = await fetch(randomWikiUrl, {
+            next: { revalidate: revalidateTTL, tags: [tagName] }
+        });
+
+        if (!randomWiki?.ok) {
+            return fallback;
+        }
+
+        content = await randomWiki.json();
+    } catch (error) {
+        console.error('Failed to fetch Wikipedia article', { url: randomWikiUrl, error });
+        return fallback;
     }
 
-    const content = await randomWiki.json();
-    let extract = content.extract;
-    if (extract.length > maxExtractLength) {
-        extract = extract.slice(0, extract.slice(0, maxExtractLength).lastIndexOf(' ')) + ' [...]';
+    if (!content || typeof content !== 'object') {
+        return fallback;
     }
+
+    const extract = truncateExtract(content.extract);
 
     return (
         <Card className="max-w-2xl">
-            <h3 className="text-2xl text-neutral-900">{content.title}</h3>
-            <div className="text-lg font-bold">{content.description}</div>
+            <h3 className="text-2xl text-neutral-900">{content.title ?? 'Random Wikipedia article'}</h3>
+            <div className="text-lg font-bold">{content.description ?? ''}</div>
             <p className="italic">{extract}</p>
-            <a target="_blank" rel="noopener noreferrer" href={content.content_urls.desktop.page}>
+            <a
+                target="_blank"
+                rel="noopener noreferrer"
+                href={content.content_urls?.desktop?.page ?? fallbackWikiUrl}
+            >
                 From Wikipedia
             </a>
         </Card>
